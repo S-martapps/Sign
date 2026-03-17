@@ -18,6 +18,10 @@
 <link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16.png">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 
+<!-- PDF generation -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
 <!-- Firebase compat SDK -->
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.0/firebase-app-compat.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/firebase@10.12.0/firebase-auth-compat.min.js"></script>
@@ -399,6 +403,8 @@ async function cfPost(endpoint, data){
 // AUTH
 // ══════════════════════════════════════
 auth.onAuthStateChanged(function(user){
+  // Ikke vis login/app hvis vi er på en public signing side
+  if(new URLSearchParams(window.location.search).has("sign")) return;
   if(user){
     q("loginScreen").classList.add("hidden");
     q("appScreen").classList.remove("hidden");
@@ -973,49 +979,130 @@ async function deleteDoc(id){
   }
 }
 
-function downloadDoc(id){
-  var d = allDocs.find(function(x){ return x.id === id; }); if(!d) return;
-
-  // Byg original-dokument sektion
-  var origSection = "";
+function buildSignedHtml(d){
+  var safeTitle = (d.title||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  var h = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + safeTitle + '</title>';
+  h += '<style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#1a1a1a}';
+  h += 'h1{font-size:22px;border-bottom:2px solid #333;padding-bottom:10px}';
+  h += 'h2{font-size:16px;margin:24px 0 10px;color:#333}';
+  h += '.meta{background:#f5f5f5;padding:16px;border-radius:8px;margin:20px 0}';
+  h += '.meta div{padding:4px 0;font-size:13px}.meta .lbl{color:#666;display:inline-block;width:120px}';
+  h += '.sig-block{border:1px solid #ddd;border-radius:8px;padding:16px;margin:12px 0}';
+  h += '.sig-block img{max-width:280px;height:auto;display:block;margin:8px 0}';
+  h += '.sig-meta{font-size:11px;color:#666;margin-top:8px;word-break:break-all}';
+  h += '.orig-pdf{width:100%;height:900px;border:1px solid #ddd;border-radius:8px;display:block}';
+  h += '.stamp{text-align:center;margin-top:40px;padding:20px;border:2px solid #2ed47a;border-radius:8px;background:#f0faf4}';
+  h += '.stamp-title{font-size:16px;font-weight:bold;color:#2ed47a}</style></head><body>';
+  h += '<h1>' + safeTitle + '</h1>';
+  h += '<div class="meta">';
+  h += '<div><span class="lbl">Oprettet:</span> ' + fmtDateTime(d.created) + '</div>';
+  h += '<div><span class="lbl">Fil:</span> ' + esc(d.fileName||"") + '</div>';
+  h += '<div><span class="lbl">Reference:</span> ' + (d.id||"") + '</div>';
+  h += '</div>';
+  // Original fil
   if(d.fileData){
-    var isPdf = /\.pdf$/i.test(d.fileName || "");
-    var isImg = /\.(png|jpe?g|gif|webp)$/i.test(d.fileName || "");
+    var isPdf = /\.pdf$/i.test(d.fileName||"");
+    var isImg = /\.(png|jpe?g|gif|webp)$/i.test(d.fileName||"");
+    h += '<h2>Originalt dokument</h2>';
     if(isPdf){
-      origSection = '<h2>Originalt dokument</h2>'
-        + '<div style="margin:12px 0;border:1px solid #ddd;border-radius:8px;overflow:hidden;">'
-        + '<embed src="' + d.fileData + '" type="application/pdf" width="100%" height="800px" style="display:block;">'
-        + '</div>'
-        + '<p style="font-size:11px;color:#888;margin-bottom:20px;">Kan ikke se PDF? <a href="' + d.fileData + '" download="' + esc(d.fileName) + '">Klik her for at downloade</a></p>';
+      h += '<embed src="' + d.fileData + '" type="application/pdf" class="orig-pdf">';
+      h += '<p style="font-size:11px;color:#888;margin:6px 0 20px;"><a href="' + d.fileData + '" download="' + esc(d.fileName) + '">Download original PDF</a></p>';
     } else if(isImg){
-      origSection = '<h2>Originalt dokument</h2>'
-        + '<div style="margin:12px 0;border:1px solid #ddd;border-radius:8px;overflow:hidden;text-align:center;padding:12px;">'
-        + '<img src="' + d.fileData + '" style="max-width:100%;height:auto;">'
-        + '</div>';
+      h += '<img src="' + d.fileData + '" style="max-width:100%;height:auto;border-radius:8px;">';
     } else {
-      // DOCX eller anden fil — tilbyd download
-      origSection = '<h2>Originalt dokument</h2>'
-        + '<div style="margin:12px 0;padding:16px;background:#f5f5f5;border-radius:8px;">'
-        + '📎 <a href="' + d.fileData + '" download="' + esc(d.fileName || "dokument") + '" style="font-weight:600;color:#2563EB;">'
-        + esc(d.fileName || "Download dokument") + '</a>'
-        + '</div>';
+      h += '<p>📎 <a href="' + d.fileData + '" download="' + esc(d.fileName||"dokument") + '" style="color:#2563EB;font-weight:600;">' + esc(d.fileName||"Download dokument") + '</a></p>';
     }
   }
-
-  var h = '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' + esc(d.title) + '</title><style>body{font-family:Arial,sans-serif;max-width:800px;margin:40px auto;padding:20px;color:#1a1a1a}h1{font-size:22px;border-bottom:2px solid #333;padding-bottom:10px}h2{font-size:16px;margin:24px 0 10px;color:#333}.meta{background:#f5f5f5;padding:16px;border-radius:8px;margin:20px 0}.meta div{padding:4px 0;font-size:13px}.meta .lbl{color:#666;display:inline-block;width:120px}.sig-block{border:1px solid #ddd;border-radius:8px;padding:16px;margin:12px 0}.sig-block img{max-width:300px;height:auto}.sig-meta{font-size:11px;color:#666;margin-top:8px;word-break:break-all}.stamp{text-align:center;margin-top:40px;padding:20px;border:2px solid #2ed47a;border-radius:8px;background:#f0faf4}.stamp-title{font-size:16px;font-weight:bold;color:#2ed47a}</style></head><body>';
-  h += "<h1>" + esc(d.title) + "</h1>";
-  h += '<div class="meta"><div><span class="lbl">Oprettet:</span> ' + fmtDateTime(d.created) + '</div><div><span class="lbl">Fil:</span> ' + esc(d.fileName || "") + '</div><div><span class="lbl">Reference:</span> ' + d.id + '</div></div>';
-  h += origSection;
-  h += "<h2>Signaturer</h2>";
-  d.signers.forEach(function(s, i){
-    h += '<div class="sig-block"><strong>' + (i+1) + ". " + esc(s.name) + '</strong><br><span style="font-size:12px;color:#666">' + esc(s.email) + '</span><br>';
-    if(s.sigImg) h += '<br><img src="' + s.sigImg + '">';
-    h += '<div class="sig-meta">Signeret: ' + fmtDateTime(s.signedAt) + '<br>Hash: ' + (s.sigHash || "") + '</div></div>';
+  h += '<h2>Signaturer</h2>';
+  d.signers.forEach(function(s,i){
+    h += '<div class="sig-block">';
+    h += '<strong>' + (i+1) + '. ' + esc(s.name) + '</strong><br>';
+    h += '<span style="font-size:12px;color:#666">' + esc(s.email) + '</span>';
+    if(s.sigImg) h += '<img src="' + s.sigImg + '">';
+    h += '<div class="sig-meta">Signeret: ' + fmtDateTime(s.signedAt) + '<br>Hash: ' + (s.sigHash||"") + '</div>';
+    h += '</div>';
   });
-  h += '<div class="stamp"><div class="stamp-title">✓ DIGITALT SIGNERET</div><div style="font-size:12px;color:#666;margin-top:6px">Alle ' + d.signers.length + ' parter har signeret via SmartSign</div></div></body></html>';
-  var blob = new Blob([h], { type:"text/html" }); var url = URL.createObjectURL(blob);
-  var a = document.createElement("a"); a.href = url; a.download = d.title.replace(/[^a-zA-Z0-9\u00e6\u00f8\u00e5\u00c6\u00d8\u00c5 _-]/g, "") + "_signeret.html";
-  document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  h += '<div class="stamp"><div class="stamp-title">✓ DIGITALT SIGNERET</div>';
+  h += '<div style="font-size:12px;color:#555;margin-top:6px">Alle ' + d.signers.length + ' parter har signeret via SmartSign</div></div>';
+  h += '</body></html>';
+  return h;
+}
+
+async function downloadDoc(id){
+  var d = allDocs.find(function(x){ return x.id === id; }); if(!d) return;
+  showLoading();
+  try {
+    var html = buildSignedHtml(d);
+    var fileName = d.title.replace(/[^a-zA-Z0-9æøåÆØÅ _-]/g,"");
+
+    // Lav en skjult iframe til rendering
+    var iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;left:-9999px;top:0;width:900px;height:1px;border:none;";
+    document.body.appendChild(iframe);
+    iframe.contentDocument.open();
+    iframe.contentDocument.write(html);
+    iframe.contentDocument.close();
+
+    await new Promise(function(r){ setTimeout(r, 800); });
+
+    var iBody = iframe.contentDocument.body;
+    iBody.style.width = "860px";
+    var totalH = iBody.scrollHeight;
+    iframe.style.height = totalH + "px";
+
+    await new Promise(function(r){ setTimeout(r, 400); });
+
+    var canvas = await html2canvas(iBody, {
+      scale: 1.5,
+      useCORS: true,
+      allowTaint: true,
+      width: 860,
+      height: totalH,
+      windowWidth: 900,
+      windowHeight: totalH
+    });
+
+    document.body.removeChild(iframe);
+
+    var { jsPDF } = window.jspdf;
+    var pdf = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
+    var pageW = pdf.internal.pageSize.getWidth();
+    var pageH = pdf.internal.pageSize.getHeight();
+    var imgData = canvas.toDataURL("image/jpeg", 0.92);
+    var imgW = pageW;
+    var imgH = (canvas.height * imgW) / canvas.width;
+    var y = 0;
+    var remaining = imgH;
+    var firstPage = true;
+    while(remaining > 0){
+      if(!firstPage) pdf.addPage();
+      var srcY = y * (canvas.height / imgH);
+      var sliceH = Math.min(pageH, remaining);
+      var slicePx = sliceH * (canvas.height / imgH);
+      var sliceCanvas = document.createElement("canvas");
+      sliceCanvas.width = canvas.width;
+      sliceCanvas.height = slicePx;
+      var ctx = sliceCanvas.getContext("2d");
+      ctx.drawImage(canvas, 0, srcY, canvas.width, slicePx, 0, 0, canvas.width, slicePx);
+      pdf.addImage(sliceCanvas.toDataURL("image/jpeg",0.92), "JPEG", 0, 0, pageW, sliceH);
+      y += pageH;
+      remaining -= pageH;
+      firstPage = false;
+    }
+
+    pdf.save(fileName + "_signeret.pdf");
+    hideLoading();
+  } catch(err){
+    hideLoading();
+    console.error("PDF fejl:", err);
+    // Fallback til HTML download
+    var html = buildSignedHtml(d);
+    var fileName = d.title.replace(/[^a-zA-Z0-9æøåÆØÅ _-]/g,"");
+    var blob = new Blob([html],{type:"text/html"});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a"); a.href=url; a.download=fileName+"_signeret.html";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
 }
 
 // ══════════════════════════════════════
@@ -1143,7 +1230,41 @@ async function renderAuditPage(){
         try{await cfPost("sendCompletionNotice",{recipients:pubDoc.signers,docTitle:pubDoc.title,signingId:pubDocId});}catch(e){}
         await db.collection("signings").doc(pubDocId).update({status:"completed"});
       }
-      pr('<div style="text-align:center;padding:32px;"><div style="font-size:48px;">✅</div><h2 style="color:var(--green);margin:16px 0 8px;">Dokument underskrevet!</h2><p style="color:var(--dim);">Tak, '+esc(s.name)+'. Din underskrift er registreret.</p></div>');
+      var dlUrl = window.location.origin + window.location.pathname + '?sign=' + pubDocId + '&idx=' + pubIdx + '&download=1';
+      pr('<div style="text-align:center;padding:32px;"><div style="font-size:48px;">✅</div><h2 style="color:var(--green);margin:16px 0 8px;">Dokument underskrevet!</h2><p style="color:var(--dim);">Tak, '+esc(s.name)+'. Din underskrift er registreret.</p>'+(pubDoc.signers.every(function(x){return x.status==="signed";}) ? '<button class="btn btn-s" style="margin-top:16px;" onclick="pubDownloadPdf()">⬇ Download signeret PDF</button>' : '<p style="font-size:12px;color:var(--muted);margin-top:12px;">Du modtager en e-mail når alle har underskrevet.</p>')+'</div>');
+      window.pubDownloadPdf = async function(){
+        showLoading();
+        try {
+          var snap = await db.collection("signings").doc(pubDocId).get();
+          var dd = snap.data(); dd.id = pubDocId;
+          var html = buildSignedHtml(dd);
+          var fileName = (dd.title||"dokument").replace(/[^a-zA-Z0-9 _-]/g,"");
+          var iframe = document.createElement("iframe");
+          iframe.style.cssText = "position:fixed;left:-9999px;top:0;width:900px;height:1px;border:none;";
+          document.body.appendChild(iframe);
+          iframe.contentDocument.open(); iframe.contentDocument.write(html); iframe.contentDocument.close();
+          await new Promise(function(r){setTimeout(r,800);});
+          var iBody = iframe.contentDocument.body; iBody.style.width="860px";
+          var totalH = iBody.scrollHeight; iframe.style.height=totalH+"px";
+          await new Promise(function(r){setTimeout(r,400);});
+          var canvas = await html2canvas(iBody,{scale:1.5,useCORS:true,allowTaint:true,width:860,height:totalH,windowWidth:900,windowHeight:totalH});
+          document.body.removeChild(iframe);
+          var {jsPDF} = window.jspdf;
+          var pdf = new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+          var pageW=pdf.internal.pageSize.getWidth(), pageH=pdf.internal.pageSize.getHeight();
+          var imgH=(canvas.height*pageW)/canvas.width, y=0, remaining=imgH, first=true;
+          while(remaining>0){
+            if(!first) pdf.addPage();
+            var srcY=y*(canvas.height/imgH), sliceH=Math.min(pageH,remaining), slicePx=sliceH*(canvas.height/imgH);
+            var sc=document.createElement("canvas"); sc.width=canvas.width; sc.height=slicePx;
+            sc.getContext("2d").drawImage(canvas,0,srcY,canvas.width,slicePx,0,0,canvas.width,slicePx);
+            pdf.addImage(sc.toDataURL("image/jpeg",0.92),"JPEG",0,0,pageW,sliceH);
+            y+=pageH; remaining-=pageH; first=false;
+          }
+          pdf.save(fileName+"_signeret.pdf");
+          hideLoading();
+        } catch(e){ hideLoading(); alert("PDF fejl: "+e.message); }
+      };
     }catch(err){pr('<div style="color:var(--red);text-align:center;padding:32px;">Fejl: '+err.message+'</div>');}
   };
 
