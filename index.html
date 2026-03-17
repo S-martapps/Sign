@@ -1042,166 +1042,143 @@ async function downloadDoc(id){
 }
 
 async function buildAndDownloadPdf(d){
-  var { jsPDF } = window.jspdf;
   var PDFLib = window.PDFLib;
-  var fileName = (d.title||"dokument").replace(/[^a-zA-Z0-9æøåÆØÅ _-]/g,"");
+  var { jsPDF } = window.jspdf;
+  var fileName = (d.title||"dokument").replace(/[^a-zA-Z0-9\u00e6\u00f8\u00e5\u00c6\u00d8\u00c5 _-]/g,"");
   var isPdf = /\.pdf$/i.test(d.fileName||"");
   var isImg = /\.(png|jpe?g|gif|webp)$/i.test(d.fileName||"");
 
-  // Build signature page using jsPDF
-  var sigPdf = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
-  var pageW = sigPdf.internal.pageSize.getWidth();
-  var margin = 15;
-  var y = 20;
+  // ── Byg signaturside med jsPDF ──
+  function buildSigPage(){
+    var pdf = new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+    var W = pdf.internal.pageSize.getWidth();
+    var M = 15; var y = 18;
 
-  // Header
-  sigPdf.setFillColor(37, 99, 235);
-  sigPdf.roundedRect(margin, y-6, pageW - margin*2, 14, 3, 3, "F");
-  sigPdf.setTextColor(255,255,255);
-  sigPdf.setFontSize(14); sigPdf.setFont("helvetica","bold");
-  sigPdf.text("SmartSign — Signeret dokument", pageW/2, y+3, {align:"center"});
-  y += 18;
+    // Header bar
+    pdf.setFillColor(37,99,235);
+    pdf.roundedRect(M, y-5, W-M*2, 13, 3, 3, "F");
+    pdf.setTextColor(255,255,255);
+    pdf.setFontSize(12); pdf.setFont("helvetica","bold");
+    pdf.text("SmartSign \u2014 Signeret dokument", W/2, y+3.5, {align:"center"});
+    y += 18;
 
-  // Title
-  sigPdf.setTextColor(26,26,26);
-  sigPdf.setFontSize(18); sigPdf.setFont("helvetica","bold");
-  sigPdf.text(d.title||"", margin, y);
-  y += 10;
+    // Titel
+    pdf.setTextColor(26,26,26);
+    pdf.setFontSize(16); pdf.setFont("helvetica","bold");
+    var titleLines = pdf.splitTextToSize(d.title||"", W-M*2);
+    pdf.text(titleLines, M, y);
+    y += titleLines.length * 7 + 4;
 
-  // Meta box
-  sigPdf.setFillColor(245,245,245);
-  sigPdf.roundedRect(margin, y, pageW - margin*2, 24, 2, 2, "F");
-  sigPdf.setFontSize(9); sigPdf.setFont("helvetica","normal");
-  sigPdf.setTextColor(100,100,100);
-  sigPdf.text("Oprettet:", margin+4, y+8);
-  sigPdf.text("Fil:", margin+4, y+14);
-  sigPdf.text("Reference:", margin+4, y+20);
-  sigPdf.setTextColor(26,26,26);
-  sigPdf.text(fmtDateTime(d.created), margin+30, y+8);
-  sigPdf.text(d.fileName||"", margin+30, y+14);
-  sigPdf.text(d.id||"", margin+30, y+20);
-  y += 30;
+    // Meta boks
+    pdf.setFillColor(245,245,245);
+    pdf.roundedRect(M, y, W-M*2, 22, 2, 2, "F");
+    pdf.setFontSize(8); pdf.setFont("helvetica","normal");
+    pdf.setTextColor(120,120,120);
+    pdf.text("Oprettet:", M+3, y+7);
+    pdf.text("Fil:", M+3, y+13);
+    pdf.text("Reference:", M+3, y+19);
+    pdf.setTextColor(40,40,40);
+    pdf.text(fmtDateTime(d.created), M+28, y+7);
+    pdf.text(pdf.splitTextToSize(d.fileName||"", W-M*2-30)[0], M+28, y+13);
+    pdf.text((d.id||"").substring(0,30), M+28, y+19);
+    y += 28;
 
-  // Signatures header
-  sigPdf.setFontSize(13); sigPdf.setFont("helvetica","bold");
-  sigPdf.setTextColor(26,26,26);
-  sigPdf.text("Underskrifter", margin, y);
-  y += 8;
-  sigPdf.setDrawColor(200,200,200);
-  sigPdf.line(margin, y, pageW-margin, y);
-  y += 6;
+    // Underskrifter overskrift
+    pdf.setFontSize(12); pdf.setFont("helvetica","bold"); pdf.setTextColor(26,26,26);
+    pdf.text("Underskrifter", M, y); y += 4;
+    pdf.setDrawColor(200,200,200); pdf.line(M, y, W-M, y); y += 6;
 
-  // Each signer
-  for(var i = 0; i < d.signers.length; i++){
-    var s = d.signers[i];
-    if(y > 240){ sigPdf.addPage(); y = 20; }
+    // Hver underskriver
+    for(var i=0; i<d.signers.length; i++){
+      var s = d.signers[i];
+      var boxH = s.sigImg ? 60 : 28;
+      if(y + boxH > 270){ pdf.addPage(); y = 20; }
 
-    // Signer box
-    sigPdf.setFillColor(250,250,255);
-    sigPdf.setDrawColor(230,230,240);
-    sigPdf.roundedRect(margin, y, pageW - margin*2, 55, 2, 2, "FD");
+      pdf.setFillColor(248,250,255); pdf.setDrawColor(220,225,240);
+      pdf.roundedRect(M, y, W-M*2, boxH, 2, 2, "FD");
 
-    sigPdf.setFontSize(11); sigPdf.setFont("helvetica","bold");
-    sigPdf.setTextColor(26,26,26);
-    sigPdf.text((i+1) + ". " + s.name, margin+4, y+8);
+      pdf.setFontSize(10); pdf.setFont("helvetica","bold"); pdf.setTextColor(26,26,26);
+      pdf.text((i+1)+". "+s.name, M+4, y+8);
+      pdf.setFontSize(8); pdf.setFont("helvetica","normal"); pdf.setTextColor(100,100,100);
+      pdf.text(s.email||"", M+4, y+14);
+      pdf.text("Signeret: "+fmtDateTime(s.signedAt), M+4, y+20);
 
-    sigPdf.setFontSize(9); sigPdf.setFont("helvetica","normal");
-    sigPdf.setTextColor(100,100,100);
-    sigPdf.text(s.email||"", margin+4, y+15);
-    sigPdf.text("Signeret: " + fmtDateTime(s.signedAt), margin+4, y+21);
-
-    // Signature image
-    if(s.sigImg){
-      try {
-        sigPdf.addImage(s.sigImg, "PNG", margin+4, y+24, 60, 22);
-      } catch(e){ console.warn("Sig img fejl", e); }
+      if(s.sigImg){
+        try{ pdf.addImage(s.sigImg,"PNG",M+4,y+23,65,25); }catch(e){}
+        pdf.setFontSize(6.5); pdf.setTextColor(160,160,160);
+        pdf.text("Hash: "+(s.sigHash||"").substring(0,55)+"...", M+4, y+boxH-3);
+      } else {
+        pdf.setFontSize(6.5); pdf.setTextColor(160,160,160);
+        pdf.text("Hash: "+(s.sigHash||"").substring(0,55)+"...", M+4, y+boxH-5);
+      }
+      y += boxH + 5;
     }
 
-    // Hash
-    sigPdf.setFontSize(7); sigPdf.setTextColor(160,160,160);
-    var hashText = "Hash: " + (s.sigHash||"").substring(0,48) + "...";
-    sigPdf.text(hashText, margin+4, y+50);
+    // Stempel
+    if(y > 255){ pdf.addPage(); y = 20; }
+    y += 4;
+    pdf.setFillColor(240,250,244); pdf.setDrawColor(46,212,122);
+    pdf.roundedRect(M, y, W-M*2, 18, 3, 3, "FD");
+    pdf.setFontSize(11); pdf.setFont("helvetica","bold"); pdf.setTextColor(30,160,80);
+    pdf.text("\u2713 DIGITALT SIGNERET VIA SMARTSIGN", W/2, y+8, {align:"center"});
+    pdf.setFontSize(8); pdf.setFont("helvetica","normal"); pdf.setTextColor(100,100,100);
+    pdf.text("Alle "+d.signers.length+" parter har underskrevet", W/2, y+14, {align:"center"});
 
-    y += 60;
+    return pdf.output("arraybuffer");
   }
 
-  // Stamp
-  if(y > 240){ sigPdf.addPage(); y = 20; }
-  y += 4;
-  sigPdf.setFillColor(240,250,244);
-  sigPdf.setDrawColor(46,212,122);
-  sigPdf.roundedRect(margin, y, pageW - margin*2, 20, 3, 3, "FD");
-  sigPdf.setFontSize(12); sigPdf.setFont("helvetica","bold");
-  sigPdf.setTextColor(30,160,80);
-  sigPdf.text("✓ DIGITALT SIGNERET VIA SMARTSIGN", pageW/2, y+9, {align:"center"});
-  sigPdf.setFontSize(9); sigPdf.setFont("helvetica","normal");
-  sigPdf.setTextColor(100,100,100);
-  sigPdf.text("Alle " + d.signers.length + " parter har underskrevet", pageW/2, y+16, {align:"center"});
+  var sigBytes = buildSigPage();
 
-  // If original is PDF — merge using pdf-lib
+  // ── Merge: original PDF + signaturside ──
   if(isPdf && d.fileData && PDFLib){
     try {
-      var base64 = d.fileData.split(",")[1];
-      var origBytes = Uint8Array.from(atob(base64), function(c){ return c.charCodeAt(0); });
-      var sigBytes = sigPdf.output("arraybuffer");
-
+      var b64 = d.fileData.split(",")[1];
+      var origBytes = Uint8Array.from(atob(b64), function(c){ return c.charCodeAt(0); });
       var merged = await PDFLib.PDFDocument.create();
       var origDoc = await PDFLib.PDFDocument.load(origBytes, {ignoreEncryption:true});
-      var sigDoc = await PDFLib.PDFDocument.load(sigBytes);
-
-      var origPages = await merged.copyPages(origDoc, origDoc.getPageIndices());
-      origPages.forEach(function(p){ merged.addPage(p); });
-      var sigPages = await merged.copyPages(sigDoc, sigDoc.getPageIndices());
-      sigPages.forEach(function(p){ merged.addPage(p); });
-
-      var mergedBytes = await merged.save();
-      var blob = new Blob([mergedBytes], {type:"application/pdf"});
+      var sigDoc  = await PDFLib.PDFDocument.load(sigBytes);
+      var op = await merged.copyPages(origDoc, origDoc.getPageIndices());
+      op.forEach(function(p){ merged.addPage(p); });
+      var sp = await merged.copyPages(sigDoc, sigDoc.getPageIndices());
+      sp.forEach(function(p){ merged.addPage(p); });
+      var mb = await merged.save();
+      var blob = new Blob([mb],{type:"application/pdf"});
       var url = URL.createObjectURL(blob);
       var a = document.createElement("a"); a.href=url; a.download=fileName+"_signeret.pdf";
       document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-      hideLoading();
-      return;
-    } catch(pdfErr){
-      console.warn("PDF merge fejl, bruger kun signaturer:", pdfErr);
-    }
+      hideLoading(); return;
+    } catch(e){ console.warn("PDF merge fejl:",e); }
   }
 
-  // If original is image — add as first page
-  if(isImg && d.fileData){
+  // ── Billede: tilføj som første side ──
+  if(isImg && d.fileData && PDFLib){
     try {
-      var imgPdf = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
-      var imgPageW = imgPdf.internal.pageSize.getWidth();
-      var imgPageH = imgPdf.internal.pageSize.getHeight();
-      var ext = (d.fileName||"").split(".").pop().toUpperCase();
-      if(ext === "JPG") ext = "JPEG";
-      imgPdf.addImage(d.fileData, ext, 0, 0, imgPageW, imgPageH, "", "FAST");
-
-      // Merge img + sig pages via pdf-lib
-      if(PDFLib){
-        var imgBytes = imgPdf.output("arraybuffer");
-        var sigBytes2 = sigPdf.output("arraybuffer");
-        var merged2 = await PDFLib.PDFDocument.create();
-        var imgDoc2 = await PDFLib.PDFDocument.load(imgBytes);
-        var sigDoc2 = await PDFLib.PDFDocument.load(sigBytes2);
-        var ip = await merged2.copyPages(imgDoc2, imgDoc2.getPageIndices());
-        ip.forEach(function(p){ merged2.addPage(p); });
-        var sp = await merged2.copyPages(sigDoc2, sigDoc2.getPageIndices());
-        sp.forEach(function(p){ merged2.addPage(p); });
-        var mb = await merged2.save();
-        var blob2 = new Blob([mb], {type:"application/pdf"});
-        var url2 = URL.createObjectURL(blob2);
-        var a2 = document.createElement("a"); a2.href=url2; a2.download=fileName+"_signeret.pdf";
-        document.body.appendChild(a2); a2.click(); document.body.removeChild(a2); URL.revokeObjectURL(url2);
-        hideLoading();
-        return;
-      }
-    } catch(imgErr){
-      console.warn("Billed merge fejl:", imgErr);
-    }
+      var imgPdf = new jsPDF({orientation:"portrait",unit:"mm",format:"a4"});
+      var W2=imgPdf.internal.pageSize.getWidth(), H2=imgPdf.internal.pageSize.getHeight();
+      var ext=(d.fileName||"").split(".").pop().toUpperCase(); if(ext==="JPG") ext="JPEG";
+      imgPdf.addImage(d.fileData, ext, 0, 0, W2, H2, "", "FAST");
+      var imgBytes = imgPdf.output("arraybuffer");
+      var merged2 = await PDFLib.PDFDocument.create();
+      var imgDoc2 = await PDFLib.PDFDocument.load(imgBytes);
+      var sigDoc2 = await PDFLib.PDFDocument.load(sigBytes);
+      var ip = await merged2.copyPages(imgDoc2, imgDoc2.getPageIndices());
+      ip.forEach(function(p){ merged2.addPage(p); });
+      var sp2 = await merged2.copyPages(sigDoc2, sigDoc2.getPageIndices());
+      sp2.forEach(function(p){ merged2.addPage(p); });
+      var mb2 = await merged2.save();
+      var blob2 = new Blob([mb2],{type:"application/pdf"});
+      var url2 = URL.createObjectURL(blob2);
+      var a2 = document.createElement("a"); a2.href=url2; a2.download=fileName+"_signeret.pdf";
+      document.body.appendChild(a2); a2.click(); document.body.removeChild(a2); URL.revokeObjectURL(url2);
+      hideLoading(); return;
+    } catch(e){ console.warn("Billed merge fejl:",e); }
   }
 
-  // Fallback — download kun signatur PDF
-  sigPdf.save(fileName + "_signeret.pdf");
+  // ── Fallback: kun signaturside ──
+  var blob3 = new Blob([sigBytes],{type:"application/pdf"});
+  var url3 = URL.createObjectURL(blob3);
+  var a3 = document.createElement("a"); a3.href=url3; a3.download=fileName+"_signeret.pdf";
+  document.body.appendChild(a3); a3.click(); document.body.removeChild(a3); URL.revokeObjectURL(url3);
   hideLoading();
 }
 
